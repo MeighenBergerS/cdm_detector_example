@@ -3,10 +3,20 @@
 # Copyright (C) 2024 Stephan Meighen-Berger,
 # Interface class to the package
 
+# imports
 import numpy as np
 from typing import Union
-from .config import config
 from tqdm.auto import tqdm
+from scipy.ndimage import gaussian_filter
+
+# Module imports
+from .config import config
+from .detector import Detector
+from .constants import year, c_water
+from .model import neutrino_fluxes
+from .injection import cross_section_CC, cross_section_NC
+from .propagation import light_production
+
 
 class DetectorExample(object):
     """Class for unifying injection, energy loss calculation, and photon propagation"""
@@ -31,21 +41,38 @@ class DetectorExample(object):
             else:
                 config.from_yaml(userconfig)
         
+        print("Setting up the seed")
         self._rng = np.random.RandomState(config["run"]["seed"])
-        #  simulation parameters
-        year = 365 * 24 * 60 * 60
-        time = 10 * year
-        molecules_per_cm3 = 3.345 * 10**22
-        molecules_detector = molecules_per_cm3 * volume_detector
-        nTargets = (16 + 2) * molecules_detector  # H2O
+        print("Random Parameters")
+        self._t = config['run']['time'] * year
+        print("Setting up the detector")
+        self._det = Detector(config['detector']['radius'])
+        self._detector_factor = self._det.nTargets * self._t * np.pi * 4
+        print("Setting up the neutrino flux")
+        fluxes = neutrino_fluxes(config["model"]["mceq storage"])
+        self._numu = fluxes[0]
+        self._nue = fluxes[1]
+        self._energy_bins = config['advanced']["energy bins"]
+        self._energy_grid = np.sqrt(self._energy_bins[1:] * self._energy_bins[:-1])
+        self._energy_widths = (self._energy_bins[1:] + self._energy_bins[:-1]) / 2
+        self._z_grid = config['advanced']["z grid"]
+        self._wavelengths = config['advanced']['wavelengths']
+        self._photon_cut = config["propagation"]['photon cut']
+        self._ns_grid = config['advanced']['ns grid']
+        print("Preliminary rates")
+        self._rates = {
+            "NuMu NC": self._detector_factor * self._numu * cross_section_NC(self._energy_grid) * self._energy_widths,
+            "NuE CC": self._detector_factor * self._nue * cross_section_CC(self._energy_grid) * self._energy_widths,
+            "NuE NC": self._detector_factor * self._nue * cross_section_NC(self._energy_grid) * self._energy_widths
+        }
+        self._em_lengths, self._had_lengths, self._em_photons, self._had_photons = (
+            light_production(self._z_grid, self._wavelengths, self._energy_grid, photon_cut=self._photon_cut)
+        )
+        self._e_cut = config['analysis']['energy cuts']
 
-        detector_factor = nTargets * time * np.pi * 4
-        interactions_numu_nc = detector_factor * numu_flux * cross_section_NC(energy_grid) * energy_widths
-        interactions_nue_CC = detector_factor * nue_flux * cross_section_CC(energy_grid) * energy_widths
-        interactions_nue_NC = detector_factor * nue_flux * cross_section_NC(energy_grid) * energy_widths
 
     # Sampling function for the interaction
-    def spatial_sampling(seflf, nsamples: int, detector_radius: float, rng: np.random.RandomState) -> np.ndarray:
+    def _spatial_sampling(self, nsamples: int, detector_radius: float, rng: np.random.RandomState) -> np.ndarray:
         """ generates an event sample
 
         Parameters
@@ -74,26 +101,25 @@ class DetectorExample(object):
     ns_bins = np.linspace(0, 100, 101)
 
     def event_generator(
-        nsamples: np.ndarray,
-        energy_grid: np.ndarray,
-        detector_radius: float,
-        rng: np.random.RandomState,
-        type='CC') -> np.ndarray:
+            self,
+            nsamples: np.ndarray,
+            rng: np.random.RandomState,
+            type='CC') -> np.ndarray:
         """ generates particle events within the detector
         """
         # Spatial generation
         spatial_samples = []
         for nsamp in nsamples:
             spatial_samples.append(
-                spatial_sampling(int(nsamp), detector_radius, rng)
+                self._spatial_sampling(int(nsamp), self._det.radius, rng)
             )
         
         if type == 'CC':
-            lengths = em_lengths
-            distro = electron_photons
+            lengths = self._em_lengths[self._e_cut[0]:self._e_cut[1]]
+            distro = self._em_photons[self._e_cut[0]:self._e_cut[1]]
         else:
-            lengths = had_lengths
-            distro = hadron_photons
+            lengths = self._had_lengths[self._e_cut[0]:self._e_cut[1]]
+            distro = self._had_photons[self._e_cut[0]:self._e_cut[1]]
         spatial_cuts = []
         timing_arr = []
         for idE, spatial_sample in enumerate(spatial_samples):
@@ -111,22 +137,24 @@ class DetectorExample(object):
                 (Y_int + Y_dir)**2 +
                 (Z_int + Z_dir)**2
             )
-            event_cut = event_r < detector_radius
+            event_cut = event_r < self._det.radius
             spatial_cuts.append(event_cut)
             # Timing
             energy_sample = []
             for idS, _ in enumerate(X_int):
                 hits_binned, _ = np.histogram(
-                    ((np.abs(event_r[idS] - detector_radius) + z_grid) / c_water) * 1e9,
-                    bins=ns_bins, weights=distro[idE]
+                    ((np.abs(event_r[idS] - self._det.radius) + self._z_grid) / c_water) * 1e9,
+                    bins=self._ns_grid, weights=distro[idE]
                 )
                 energy_sample.append(gaussian_filter(hits_binned, sigma=2, radius=10))
             timing_arr.append(energy_sample)
-        spatial_cuts = np.array(spatial_cuts)
-        return spatial_samples, np.array(timing_arr), spatial_cuts
+        spatial_cuts = np.array(spatial_cuts, dtype=object)
+        return spatial_samples, np.array(timing_arr, dtype=object), spatial_cuts
 
+    # -------------------------------------------------------------------------------------------
+    # Some basic analysis scripts for convenience
     # Analysis
-    def tail_vs_start(pulses: np.ndarray) -> np.ndarray:
+    def _tail_vs_start(self, pulses: np.ndarray) -> np.ndarray:
         """ takes an array of pulses and checks their likelihood of being a CC event
         """
         idmaxes = np.argmax(pulses, axis=1)
@@ -137,25 +165,25 @@ class DetectorExample(object):
         ])
         return ratio_arr
 
-    def data_TvsS_test(all_pulses: np.ndarray, cuts:np.ndarray) -> np.ndarray:
+    def _data_TvsS_test(self, all_pulses: np.ndarray, cuts:np.ndarray) -> np.ndarray:
         """ helper function to apply analysis to the entire set
         """
         ratio_energy_bins = []
         for idE, energy_bin in enumerate(all_pulses):
             tmp_pulses = np.array(energy_bin)[cuts[idE]]
-            ratio_energy_bins.append(tail_vs_start(tmp_pulses))
+            ratio_energy_bins.append(self._tail_vs_start(tmp_pulses))
         return np.concatenate(np.array(ratio_energy_bins, dtype=object))
 
-    def data_TvsS_cut(all_pulses: np.ndarray, cuts:np.ndarray, TvsS_cut: float) -> np.ndarray:
+    def _data_TvsS_cut(self, all_pulses: np.ndarray, cuts:np.ndarray, TvsS_cut: float) -> np.ndarray:
         """ helper function to apply analysis cuts to the entire set
         """
         tmp_bool = []
         for idE, energy_bin in enumerate(all_pulses):
             tmp_pulses = np.array(energy_bin)[cuts[idE]]
-            tmp_bool.append(np.less(tail_vs_start(tmp_pulses), TvsS_cut))
+            tmp_bool.append(np.less(self._tail_vs_start(tmp_pulses), TvsS_cut))
         return np.array(tmp_bool, dtype=object)
 
-    def analysis_simulation(nTrials: int, signal: np.ndarray, background: np.ndarray, seed=1337) -> np.ndarray:
+    def _analysis_simulation(self, nTrials: int, signal: np.ndarray, background: np.ndarray, seed=1337) -> np.ndarray:
         """ entire analysis multiple times
         """
         totals_CC_pre = []
@@ -164,20 +192,16 @@ class DetectorExample(object):
         totals_NC = []
         rng_trial = np.random.RandomState(seed)
         # Offloading some random number work before loop
-        signal_sets = rng_trial.poisson(signal[10:22], size=(nTrials, len(signal[10:22])))
-        background_sets = rng_trial.poisson(background[10:22], size=(nTrials, len(signal[10:22])))
+        signal_sets = rng_trial.poisson(signal[self._e_cut[0]:self._e_cut[1]], size=(nTrials, len(signal[self._e_cut[0]:self._e_cut[1]])))
+        background_sets = rng_trial.poisson(background[self._e_cut[0]:self._e_cut[1]], size=(nTrials, len(signal[self._e_cut[0]:self._e_cut[1]])))
         for set in tqdm(range(nTrials)):
-            _, timing_samples_CC, cuts_CC = event_generator(
+            _, timing_samples_CC, cuts_CC = self.event_generator(
                 signal_sets[set],  # Sampling the events as well!
-                energy_grid[10:22],
-                demo_sphere_radius,
                 rng_trial,
                 type='CC'
             )
-            _, timing_samples_NC, cuts_NC = event_generator(
+            _, timing_samples_NC, cuts_NC = self.event_generator(
                 background_sets[set],
-                energy_grid[10:22],
-                demo_sphere_radius,
                 rng_trial,
                 type='NC'
             )
@@ -187,8 +211,8 @@ class DetectorExample(object):
             NC_counts = np.array([
                 np.sum(cut_e) for cut_e in cuts_NC
             ])
-            cc_cut_set = data_TvsS_cut(timing_samples_CC, cuts_CC, 1.5023693639498166)
-            nc_cut_set = data_TvsS_cut(timing_samples_NC, cuts_NC, 1.5023693639498166)
+            cc_cut_set = self._data_TvsS_cut(timing_samples_CC, cuts_CC, 1.5023693639498166)
+            nc_cut_set = self._data_TvsS_cut(timing_samples_NC, cuts_NC, 1.5023693639498166)
 
             # Sum didn't work
             cc_cut_counts = np.array([
@@ -206,4 +230,9 @@ class DetectorExample(object):
             totals_CC, totals_CC_pre,
         ])
 
-    results = analysis_simulation(100, interactions_nue_NC, (interactions_numu_nc + interactions_nue_CC))
+    def _example_analysis(self, nTrials):
+        return self._analysis_simulation(
+            nTrials,
+            self._rates['NuE CC'],
+            (self._rates['NuE NC'] + self._rates['NuMu NC'])
+        )

@@ -3,8 +3,28 @@
 # Detector Functions
 
 #  simulation parameters
-year = 365 * 24 * 60 * 60
-time = 10 * year
-molecules_per_cm3 = 3.345 * 10**22
-molecules_detector = molecules_per_cm3 * volume_detector
-nTargets = (16 + 2) * molecules_detector  # H2O
+
+from ..constants import water_nucleons, molecules_per_cm3
+import numpy as np
+
+class Detector(object):
+    """ detector class
+    """
+    def __init__(self, radius: float):
+        """ initializes the class
+        """
+        self._radius = radius
+        self._volume = 4 / 3 * np.pi * radius**3
+        self._nTargets = molecules_per_cm3 * self._volume * water_nucleons
+
+    @property
+    def nTargets(self):
+        return self._nTargets
+
+    @property
+    def volume(self):
+        return self._volume
+
+    @property
+    def radius(self):
+        return self._radius

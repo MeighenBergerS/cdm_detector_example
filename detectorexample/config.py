@@ -22,7 +22,7 @@ _baseconfig = {
     ###########################################################################
     "run": {
         "seed": 1337,
-        'nevents': 10,
+        "time": 10  # in years
     },
     ###########################################################################
     # Model
@@ -50,13 +50,20 @@ _baseconfig = {
         "photon cut": 100,  # minimal number of photons per cm required
     },
     ###########################################################################
+    # Analysis  This is just for convenience!
+    ###########################################################################
+    "analysis": {
+        "energy cuts": [10, 22],
+    },
+    ###########################################################################
     # Advanced (no touching without understanding the code!)
     ###########################################################################
     "advanced": {
-        "energy grid": np.logspace(np.log10(0.07943282347242814), 11, 122),
+        "energy bins": np.logspace(np.log10(0.07943282347242814), 11, 122),
         # TODO: This needs to become dependent on the refractive index
         "z grid": np.linspace(0, 1e4, int(1e4 / 23)),  # Weird number due to speed of light in water and timing used later
-        "wavelengths": np.linspace(350., 500., 100)  # in nm
+        "wavelengths": np.linspace(350., 500., 100),  # in nm
+        "ns grid": np.linspace(0, 100, 101)  # Pulse shape grid
     }
 }
 
