@@ -1,13 +1,11 @@
 # -*- coding: utf-8 -*-
 # Name: config.py
-# Copyright (C) 2022 Stephan Meighen-Berger
+# Copyright (C) 2024 Stephan Meighen-Berger
 # Config file for the pr_dformat package.
 
 from typing import Dict, Any
+import numpy as np
 import yaml
-import os
-
-RESOURCES_DIR = os.path.abspath(f"{os.path.dirname(__file__)}/../resources/")
 
 _baseconfig: Dict[str, Any]
 
@@ -23,194 +21,42 @@ _baseconfig = {
     # Scenario input
     ###########################################################################
     "run": {
-        "run number": 1337,
+        "seed": 1337,
         'nevents': 10,
-        'storage prefix': './output/',
-        # Random seed will follow run number if None
-        "outfile": None,
-        "random state seed": None
+    },
+    ###########################################################################
+    # Model
+    ###########################################################################
+    "model": {
+        "model": "mceq",
+        "mceq storage": '../data/'
+    },
+    ###########################################################################
+    # Injection
+    ###########################################################################
+    "injection": {
+        "cross section": 1e-38,  # scale of the cross section
     },
     ###########################################################################
     # Detector
     ###########################################################################
     "detector": {
-        'geo file': None # Name of the file to use for detector
+        "radius": 10 * 1e2,  # in cm
     },
     ###########################################################################
-    # Injection
+    # Propagation
     ###########################################################################
-    'injection': {
-        'name': 'LeptonInjector',
-        'LeptonInjector': {
-            'inject': True,
-            'paths':{
-                'install location': '/opt/LI/install/lib/python3.9/site-packages',
-                'xsec dir': f'{RESOURCES_DIR}/cross_section_splines/',
-                # These fields will be set with output prefix and run number
-                "earth model location": None,
-                'injection file': None,
-                "lic file": None,
-                'diff xsec': None,
-                'total xsec': None,
-            },
-            'simulation': {
-                'final state 1': 'MuMinus',
-                'final state 2': 'Hadrons',
-                'minimal energy': 1e2, # GeV
-                'maximal energy': 1e6, # GeV
-                'power law': 1.0, # Energies picked by E^{-(power law)}
-                'min zenith': 0.0, # degree
-                'max zenith': 180.0, # degree
-                'min azimuth': 0.0, # degree
-                'max azimuth': 360.0, # degree
-                # The following None params will be set internally unless specified
-                'is ranged': None, # TODO account for this into mims
-                "injection radius": None, # m
-                "endcap length": None, # m
-                "cylinder radius": None, # m
-                "cylinder height": None, # m
-                #'earth model': None
-            },
-        },
-        'Prometheus':{
-            # TODO make error if this is set to True
-            'inject': False,
-            'paths': {
-                'injection file': None,
-            },
-            'simulation': {}
-        },
-        'GENIE':{
-            # TODO make error if this is set to True
-            'inject': False,
-            'paths': {
-                "injection file": None,
-            },
-            'simulation': {}
-        }
+    "propagation": {
+        "photon cut": 100,  # minimal number of photons per cm required
     },
     ###########################################################################
-    # Lepton propagator
+    # Advanced (no touching without understanding the code!)
     ###########################################################################
-    'lepton propagator': {
-        'name': 'new proposal',
-        # PROPOSAL with versions >= 7
-        "new proposal":{
-            "paths":{
-                "tables path": f"{RESOURCES_DIR}/PROPOSAL_tables/",
-                "earth model location": None,
-            },
-            "simulation":{
-                # TODO Maybe this should all be in M
-                #'track length': 5000,
-                # TODO figure out why this breaks for 1e-2
-                'vcut': 0.1,
-                'ecut': 0.5, # GeV
-                #'soft losses': False, # These are particles that don't generate cherenkov light
-                'interpolation': True,
-                'lpm effect': True,
-                'continuous randomization': True,
-                'soft losses': True,
-                "interpolate": True,
-                "decay": True,
-                'scattering model': "Moliere",
-                #'maximum radius': 1e18, # m
-                # all none elements will be set off detector config settings
-                #'inner radius': None,
-                'propagation padding': None, # m
-                # TODO is this being used
-                'medium': None,
-            },
-        },
-        # PROPOSAL with versions <= 6
-        "old proposal":{
-            "paths":{
-                "tables path": "~/.local/share/PROPOSAL/tables",
-                "earth model location": None,
-            },
-            "simulation":{
-                #'track length': 5000,
-                'vcut': 1,
-                'ecut': 0.1, # GeV
-                #'soft losses': False,
-                'interpolation': True,
-                'lpm effect': True,
-                'continuous randomization': True,
-                'soft losses': True,
-                'scattering model': "Moliere",
-                # 'force propagation params': False,
-                #'maximum radius' : 1e18, # m
-                # all none elements will be set off detector config settings
-                #'inner radius': None,
-                'propagation padding': None,
-                'medium': None,
-            }
-        }
-    },
-    ###########################################################################
-    # Photon propagator
-    ###########################################################################
-    'photon propagator': {
-        'name': None, # We will set this based on detector medium
-        "photon field name": "photons",
-        'olympus': {
-            "paths": {
-                'location': f"{RESOURCES_DIR}/olympus_resources/",
-                'photon model': 'pone_config.json',
-                'flow': "photon_arrival_time_nflow_params.pickle",
-                'counts': "photon_arrival_time_counts_params.pickle",
-                #"photon field name": "photons",
-                #"outfile": None
-            },
-            "simulation": {
-                'files': True,
-                'wavelength': 700,  # in nm
-                'splitter': 100000,  # Module chunks to work on at once (higher = faster but more memory)
-            },
-            'particles':
-            {
-                'track particles': [13, -13, 15, -15],
-                'explicit': [11, -11, 111, 211, 13, -13, 15, -15],
-                'replacement': 2212,
-            },
-        },
-        'PPC_CUDA':{
-            "paths":{
-                'location': f'{RESOURCES_DIR}/PPC_executables/PPC_CUDA/',
-                'force': False,
-                "ppc_tmpdir:": "./.ppc_tmp",
-                'ppc_tmpfile':'.event_hits.ppc.tmp',
-                'f2k_tmpfile':'.event_losses.f2k.tmp',
-                'ppc_prefix':'',
-                'f2k_prefix':'',
-                'ppctables':'../resources/PPC_tables/south_pole/',
-                'ppc_exe':'../resources/PPC_executables/PPC_CUDA/ppc', # binary executable
-                #"outfile": None
-            },
-            "simulation": {
-                'device':0, # GPU,
-                'supress_output': True,
-            }
-        },
-        'PPC': {
-            "paths": {
-                'location':f'{RESOURCES_DIR}/PPC_executables/PPC/',
-                'force': False,
-                "ppc_tmpdir": "./.ppc_tmp",
-                'ppc_tmpfile': '.event_hits.ppc.tmp',
-                'f2k_tmpfile': '.event_losses.f2k.tmp',
-                'ppc_prefix':'',
-                'f2k_prefix':'',
-                'ppctables':'../resources/PPC_tables/south_pole/',
-                'ppc_exe': '../resources/PPC_executables/PPC/ppc',  # binary executable
-                #"photon field name": "photons",
-                #"outfile": None,
-            },
-            "simulation": {
-                'device': 0,  # CPU
-                'supress_output': True
-            }
-        },
+    "advanced": {
+        "energy grid": np.logspace(np.log10(0.07943282347242814), 11, 122),
+        # TODO: This needs to become dependent on the refractive index
+        "z grid": np.linspace(0, 1e4, int(1e4 / 23)),  # Weird number due to speed of light in water and timing used later
+        "wavelengths": np.linspace(350., 500., 100)  # in nm
     }
 }
 
